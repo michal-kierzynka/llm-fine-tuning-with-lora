@@ -16,3 +16,4 @@ dependencies:
     - datasets==2.15.0
     - transformers
     - accelerate
+    - peft

@@ -48,6 +48,7 @@ model = AutoModelForSequenceClassification.from_pretrained(
 for param in model.parameters():
     param.requires_grad = True
 
+
 def compute_metrics(eval_pred):
     predictions, labels = eval_pred
     predictions = np.argmax(predictions, axis=1)
