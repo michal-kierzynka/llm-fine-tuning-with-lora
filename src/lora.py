@@ -1,19 +1,21 @@
+import argparse
 import dataclasses
 import sys
-import argparse
 
+import datasets
 import numpy as np
+
 from datasets import load_dataset
-from peft import AutoPeftModelForSequenceClassification, TaskType
+from peft import AutoPeftModelForSequenceClassification, TaskType, PeftModelForSequenceClassification
 from peft import LoraConfig, get_peft_model
-from transformers import AutoModelForSequenceClassification, PreTrainedTokenizerBase
+from transformers import AutoModelForSequenceClassification, PreTrainedTokenizerBase, PreTrainedModel
 from transformers import AutoTokenizer, DataCollatorWithPadding, Trainer, TrainingArguments
 
 
 @dataclasses.dataclass
 class Dataset:
     tokenizer: PreTrainedTokenizerBase
-    tokenized_dataset: dict
+    tokenized_dataset: dict[str, datasets.arrow_dataset.Dataset]
     num_labels: int
     id2label: dict[int, str]
     label2id: dict[str, int]
@@ -50,17 +52,18 @@ def get_sms_dataset(model_name: str) -> Dataset:
     return dataset
 
 
-def get_fresh_model(model_name: str, dataset: Dataset):
+def get_fresh_model(model_name: str, dataset: Dataset) -> PreTrainedModel:
     model = AutoModelForSequenceClassification.from_pretrained(
-        model_name,
+        pretrained_model_name_or_path=model_name,
         num_labels=dataset.num_labels,
         id2label=dataset.id2label,
         label2id=dataset.label2id,
     )
+
     return model
 
 
-def get_fresh_lora_model(model_name: str, dataset: Dataset):
+def get_fresh_lora_model(model_name: str, dataset: Dataset) -> PeftModelForSequenceClassification:
     model = get_fresh_model(model_name=model_name, dataset=dataset)
     # print(model)  # use it to find out names of target_modules for Lora config
 
@@ -76,26 +79,26 @@ def get_fresh_lora_model(model_name: str, dataset: Dataset):
         fan_in_fan_out=True,
     )
 
-    lora_model = get_peft_model(model, config)
+    lora_model = get_peft_model(model=model, peft_config=config)
     lora_model.print_trainable_parameters()
 
     return lora_model
 
 
-def load_fine_tuned_lora_model(model_directory: str):
+def load_fine_tuned_lora_model(model_directory: str) -> PeftModelForSequenceClassification:
     lora_model = AutoPeftModelForSequenceClassification.from_pretrained(
         pretrained_model_name_or_path=model_directory)
 
     return lora_model
 
 
-def compute_metrics(eval_pred):
+def compute_metrics(eval_pred) -> dict[str, float]:
     predictions, labels = eval_pred
     predictions = np.argmax(predictions, axis=1)
     return {"accuracy": (predictions == labels).mean()}
 
 
-def get_trainer(model, dataset: Dataset):
+def get_trainer(model: PreTrainedModel, dataset: Dataset) -> Trainer:
     # The HuggingFace Trainer class handles the training and eval loop for PyTorch for us.
     # Read more about it here https://huggingface.co/docs/transformers/main_classes/trainer
 
@@ -124,14 +127,6 @@ def get_trainer(model, dataset: Dataset):
         compute_metrics=compute_metrics,
     )
     return trainer
-
-
-def eval_lora_model(model_name: str, tokenizer):
-    lora_model = AutoPeftModelForSequenceClassification.from_pretrained("gpt-lora")
-
-    inputs = tokenizer("Hello, my name is ", return_tensors="pt")
-    outputs = lora_model.generate(input_ids=inputs["input_ids"], max_new_tokens=10)
-    print(tokenizer.batch_decode(outputs))
 
 
 def evaluate_pre_trained_model(model_name: str, dataset: Dataset):
@@ -186,9 +181,6 @@ def main(argv):
 
     if args.eval_fine_tuned:
         evaluate_fine_tuned_model(dataset=dataset, model_directory=model_directory)
-
-    # TODO: add readme of how to set up env and run program
-    # TODO: add type hints
 
 
 if __name__ == "__main__":
