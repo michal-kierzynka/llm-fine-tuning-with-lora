@@ -13,6 +13,7 @@ First create virtual environment with conda. Requirements are provided in
 
 ```
 conda env create -f environment-cpu.yml
+conda activate llm
 ```
 
 Run evaluation of baseline model, then run fine-tuning, and finally
