@@ -1,4 +1,5 @@
 import sys
+import argparse
 
 import numpy as np
 from datasets import load_dataset
@@ -22,13 +23,18 @@ def prepare_dataset(tokenizer):
     return tokenized_dataset
 
 
-def get_fresh_lora_model(model_name: str):
+def get_fresh_model(model_name: str):
     model = AutoModelForSequenceClassification.from_pretrained(
         model_name,
         num_labels=2,
         id2label={0: "not spam", 1: "spam"},
         label2id={"not spam": 0, "spam": 1},
     )
+    return model
+
+
+def get_fresh_lora_model(model_name: str):
+    model = get_fresh_model(model_name=model_name)
     # print(model)  # use it to find out names of target_modules for Lora config
 
     config = LoraConfig(
@@ -62,14 +68,14 @@ def compute_metrics(eval_pred):
     return {"accuracy": (predictions == labels).mean()}
 
 
-def get_trainer(lora_model, tokenizer, tokenized_dataset):
+def get_trainer(model, tokenizer, tokenized_dataset):
     # The HuggingFace Trainer class handles the training and eval loop for PyTorch for us.
     # Read more about it here https://huggingface.co/docs/transformers/main_classes/trainer
 
-    lora_model.config.pad_token_id = tokenizer.pad_token_id
+    model.config.pad_token_id = tokenizer.pad_token_id
 
     trainer = Trainer(
-        model=lora_model,
+        model=model,
         args=TrainingArguments(
             output_dir="./data/spam_not_spam",
             # Set the learning rate
@@ -109,7 +115,7 @@ def get_tokenizer(model_name: str):
 
 
 def evaluate_pre_trained_model(model_name: str, tokenizer, tokenized_dataset):
-    lora_model = get_fresh_lora_model(model_name=model_name)
+    lora_model = get_fresh_model(model_name=model_name)
     trainer = get_trainer(lora_model, tokenizer, tokenized_dataset)
 
     metric = trainer.evaluate()
@@ -133,15 +139,33 @@ def evaluate_fine_tuned_model(tokenizer, tokenized_dataset, model_directory="gpt
     print(metric)
 
 
-def main():
+def main(argv):
+    parser = argparse.ArgumentParser(description="Trains and evaluates GPT-2 model on a toy sms spam dataset.")
+    parser.add_argument('--eval_pre_trained', action="store_true",
+                        help="Runs evaluation of a pre-trained model")
+    parser.add_argument('--train_and_save', action="store_true",
+                        help="Runs model training and saves it at the end")
+    parser.add_argument('--eval_fine_tuned', action="store_true",
+                        help="Runs evaluation of a fine-tuned model")
+    args = parser.parse_args(argv)
+
+    if not (args.eval_pre_trained or args.train_and_save or args.eval_fine_tuned):
+        print("Please use at least one program options listed in --help")
+        quit()
+
     model_name: str = "gpt2"
     tokenizer = get_tokenizer(model_name=model_name)
     tokenized_dataset = prepare_dataset(tokenizer=tokenizer)
 
-    evaluate_pre_trained_model(model_name=model_name, tokenizer=tokenizer, tokenized_dataset=tokenized_dataset)
-    # train_and_save(model_name=model_name, tokenizer=tokenizer, tokenized_dataset=tokenized_dataset)
-    # evaluate_fine_tuned_model(tokenizer=tokenizer, tokenized_dataset=tokenized_dataset)
+    if args.eval_pre_trained:
+        evaluate_pre_trained_model(model_name=model_name, tokenizer=tokenizer, tokenized_dataset=tokenized_dataset)
+
+    if args.train_and_save:
+        train_and_save(model_name=model_name, tokenizer=tokenizer, tokenized_dataset=tokenized_dataset)
+
+    if args.eval_fine_tuned:
+        evaluate_fine_tuned_model(tokenizer=tokenizer, tokenized_dataset=tokenized_dataset)
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])
