@@ -2,9 +2,8 @@ import sys
 
 import numpy as np
 from datasets import load_dataset
-from peft import AutoPeftModelForCausalLM, AutoPeftModelForSequenceClassification, TaskType
+from peft import AutoPeftModelForSequenceClassification, TaskType
 from peft import LoraConfig, get_peft_model
-from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
 from transformers import AutoModelForSequenceClassification
 from transformers import AutoTokenizer, DataCollatorWithPadding, Trainer, TrainingArguments
 
@@ -23,15 +22,13 @@ def prepare_dataset(tokenizer):
     return tokenized_dataset
 
 
-def get_lora_model(model_name: str, pad_token_id: int):
+def get_fresh_lora_model(model_name: str):
     model = AutoModelForSequenceClassification.from_pretrained(
         model_name,
         num_labels=2,
         id2label={0: "not spam", 1: "spam"},
         label2id={"not spam": 0, "spam": 1},
     )
-    model.config.pad_token_id = pad_token_id
-
     # print(model)  # use it to find out names of target_modules for Lora config
 
     config = LoraConfig(
@@ -52,15 +49,25 @@ def get_lora_model(model_name: str, pad_token_id: int):
     return lora_model
 
 
+def load_fine_tuned_lora_model(model_directory: str):
+    lora_model = AutoPeftModelForSequenceClassification.from_pretrained(
+        pretrained_model_name_or_path=model_directory)
+
+    return lora_model
+
+
 def compute_metrics(eval_pred):
     predictions, labels = eval_pred
     predictions = np.argmax(predictions, axis=1)
     return {"accuracy": (predictions == labels).mean()}
 
 
-def train_lora_model(lora_model, tokenizer, tokenized_dataset):
+def get_trainer(lora_model, tokenizer, tokenized_dataset):
     # The HuggingFace Trainer class handles the training and eval loop for PyTorch for us.
     # Read more about it here https://huggingface.co/docs/transformers/main_classes/trainer
+
+    lora_model.config.pad_token_id = tokenizer.pad_token_id
+
     trainer = Trainer(
         model=lora_model,
         args=TrainingArguments(
@@ -83,34 +90,57 @@ def train_lora_model(lora_model, tokenizer, tokenized_dataset):
         data_collator=DataCollatorWithPadding(tokenizer=tokenizer),
         compute_metrics=compute_metrics,
     )
-
-    trainer.evaluate()
-
-    trainer.train()
-
-    trainer.evaluate()
-
-    lora_model.save_pretrained("gpt-lora")
+    return trainer
 
 
 def eval_lora_model(model_name: str, tokenizer):
-    lora_model = AutoPeftModelForCausalLM.from_pretrained("gpt-lora")
+    lora_model = AutoPeftModelForSequenceClassification.from_pretrained("gpt-lora")
 
     inputs = tokenizer("Hello, my name is ", return_tensors="pt")
     outputs = lora_model.generate(input_ids=inputs["input_ids"], max_new_tokens=10)
     print(tokenizer.batch_decode(outputs))
 
 
-def main():
-    model_name: str = "gpt2"
-
+def get_tokenizer(model_name: str):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.pad_token = tokenizer.eos_token
 
-    lora_model = get_lora_model(model_name=model_name, pad_token_id=tokenizer.pad_token_id)
+    return tokenizer
 
+
+def evaluate_pre_trained_model(model_name: str, tokenizer, tokenized_dataset):
+    lora_model = get_fresh_lora_model(model_name=model_name)
+    trainer = get_trainer(lora_model, tokenizer, tokenized_dataset)
+
+    metric = trainer.evaluate()
+    print(metric)
+
+
+def train_and_save(model_name: str, tokenizer, tokenized_dataset, save_directory="gpt-lora"):
+    lora_model = get_fresh_lora_model(model_name=model_name)
+    trainer = get_trainer(lora_model, tokenizer, tokenized_dataset)
+
+    trainer.train()
+
+    lora_model.save_pretrained(save_directory=save_directory)
+
+
+def evaluate_fine_tuned_model(tokenizer, tokenized_dataset, model_directory="gpt-lora"):
+    lora_model = load_fine_tuned_lora_model(model_directory=model_directory)
+    trainer = get_trainer(lora_model, tokenizer, tokenized_dataset)
+
+    metric = trainer.evaluate()
+    print(metric)
+
+
+def main():
+    model_name: str = "gpt2"
+    tokenizer = get_tokenizer(model_name=model_name)
     tokenized_dataset = prepare_dataset(tokenizer=tokenizer)
-    train_lora_model(lora_model, tokenizer, tokenized_dataset)
+
+    evaluate_pre_trained_model(model_name=model_name, tokenizer=tokenizer, tokenized_dataset=tokenized_dataset)
+    # train_and_save(model_name=model_name, tokenizer=tokenizer, tokenized_dataset=tokenized_dataset)
+    # evaluate_fine_tuned_model(tokenizer=tokenizer, tokenized_dataset=tokenized_dataset)
 
 
 if __name__ == "__main__":
